@@ -1,0 +1,2 @@
+# SendRedPacketDynamicEffect
+仿抹茶直播发送红包动效
