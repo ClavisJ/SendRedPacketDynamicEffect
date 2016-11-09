@@ -6,6 +6,14 @@
 //  Copyright © 2016年 JJ. All rights reserved.
 //
 
+/*
+ 
+ 1.计算的时候加锁
+ 2.atomic 属性
+ 3.用线程来实现  线程加同步锁
+ 
+*/
+
 import UIKit
 
 class ViewController: UIViewController {
@@ -14,10 +22,11 @@ class ViewController: UIViewController {
     let maxPointY: CGFloat = 350.0
     let minCellMargin: CGFloat = 70.0
     var currentRedPacketNumber = 0
-    var serialQueueArray : Array<DispatchQueue> = [] // 串行队列数组
-    var queueTaskNumber : Array<Int> = []
+    
+    var queueTaskArray : Array<[String]> = [] // 每个队列的任务
     var queueStateArray: Array<Bool> = [] // 每个红包队列当前状态  false 当前无任务 true 当前正在显示红包
-    var waitTaskArray: Array<String> = [] // 待完成任务队列
+    
+    let lock = NSRecursiveLock.init()
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,45 +34,65 @@ class ViewController: UIViewController {
     }
     
     func setupData() {
-        for count in 1...maxShowRedPacketNumber {
-            let queueLabel = "queue" + String(count)
-            serialQueueArray.append(DispatchQueue.init(label: queueLabel))
-            queueTaskNumber.append(0)
+        for _ in 1...maxShowRedPacketNumber {
+            queueTaskArray.append([])
             queueStateArray.append(false)
         }
     }
     
-    func getQueueIndex() -> Int? {
-        let min = queueTaskNumber.min()!
+    func getQueueIndex() -> Int {
         
-        if min > 0 {
-            return nil
+        let queueCountArray = queueTaskArray.map { (array) -> Int in
+            return array.count
         }
         
-        for (index, item) in queueTaskNumber.enumerated() {
+        let min = queueCountArray.min()!
+        
+        for (index, item) in queueCountArray.enumerated() {
             if min == item {
                 return index
             }
         }
+        
         return 0
     }
     
-    func handleTask() {
-        if self.waitTaskArray.first == nil {
-            //print("task finish")
+    // 加锁  NSRecursiveLock
+    func handleTask(index: Int) {
+        
+        lock.lock()
+        
+        let specificQueueArray = queueTaskArray[index]
+        // 队列当前的count大于1 说明有任务排在前面 就立即执行
+        if specificQueueArray.count > 1 {
             return
         }
         
-        let name =  self.waitTaskArray.first!
+        self.handleNextTask(index: index)
         
-        let index = self.getQueueIndex()
+        lock.unlock()
+    }
+    
+    
+    func handleNextTask(index: Int) {
+        let specificQueueArray = queueTaskArray[index]
         
-        if index == nil {
+        // 队列没有任务
+        if specificQueueArray.count == 0 {
             return
         }
         
-        self.sendRedPacket(index: index!, name: name)
-        self.waitTaskArray.removeFirst()
+        // 当前是否有正在执行的任务
+        if queueStateArray[index] {
+            return
+        }
+        
+        // 执行任务
+        let name =  specificQueueArray.first!
+        self.sendRedPacket(index: index, name: name)
+        
+        // 修改队列当前状态
+        queueStateArray[index] = true
     }
     
     func sendRedPacket(index: Int, name: String) {
@@ -71,181 +100,36 @@ class ViewController: UIViewController {
         let amount: CGFloat = CGFloat(arc4random() % 10000) / 100.00
         let pointY = maxPointY - CGFloat(index) * minCellMargin
         
-        let beforeNumber = queueTaskNumber[index]
-        queueTaskNumber[index] = beforeNumber + 1
-        
-        let redPacketBox = RedPacketBoxView.init(name: name, amount: amount, pointY: pointY, number: index) { (index) in
-            let beforeNumber = self.queueTaskNumber[index]
-            self.queueTaskNumber[index] = beforeNumber - 1
-            self.handleTask()
+        let redPacketBox = RedPacketBoxView.init(name: name, amount: amount, pointY: pointY, index: index) { (index) in
+            
+            // 出队列
+            var specificQueueArray = self.queueTaskArray[index]
+            if specificQueueArray.count != 0 {
+                specificQueueArray.removeFirst()
+            }
+            
+            self.queueTaskArray[index] = specificQueueArray
+            
+            // 改状态
+            self.queueStateArray[index] = false
+            
+            // 执行下个任务
+            self.handleNextTask(index: index)
         }
         self.view.addSubview(redPacketBox)
         redPacketBox.appearAnimation()
     }
     
     @IBAction func sendButtonTap(_ sender: AnyObject) {
-        
-        let index = self.getQueueIndex()
+        // 直接将任务加入队列
         currentRedPacketNumber += 1
+        let index = self.getQueueIndex()
         
-        // logic 2
+        var specificQueueArray = queueTaskArray[index]
+        specificQueueArray.append(String(currentRedPacketNumber))
+        queueTaskArray[index] = specificQueueArray
         
-        
-        if index == nil {
-            // 添加任务到待完成中
-            self.waitTaskArray.append(String(currentRedPacketNumber))
-            return
-        }
-        
-        self.sendRedPacket(index: index!, name: String(currentRedPacketNumber))
+        self.handleTask(index: index)
     }
-
-    func snowEffect() {
-        // 粒子发射器
-        let snowEmitter = CAEmitterLayer.init()
-        // 粒子发射的位置
-        snowEmitter.emitterPosition = CGPoint.init(x: self.view.bounds.size.width/2.0, y: self.view.bounds.size.height/2.0)
-        // 发射源大小
-        snowEmitter.emitterSize = CGSize.init(width: 0, height:0)
-        // 发射模式
-        snowEmitter.emitterMode = kCAEmitterLayerOutline
-        // 发射源的形状
-        snowEmitter.emitterShape = kCAEmitterLayerRectangle
-        
-        snowEmitter.renderMode = kCAEmitterLayerAdditive
-        
-        // 创建雪花粒子
-        let snowflake = CAEmitterCell.init()
-        // 粒子的名字
-        snowflake.name = "snow"
-        // 粒子参数的速度乘数因子 越大出现的越快
-        snowflake.birthRate = 3.0
-        // 存活时间
-        snowflake.lifetime = 3.0
-        snowflake.lifetimeRange = 1.0
-        // 粒子速度
-        snowflake.velocity = 300
-        // 粒子速度范围
-        snowflake.velocityRange = 5
-        
-        // 粒子的发射方向
-        snowflake.emissionLatitude = CGFloat(90.0 * M_PI / 180.0)
-        
-        // 粒子y方向加速度分量
-        snowflake.yAcceleration = 2
-        // 周围发射角度
-
-        
-        snowflake.emissionRange = CGFloat(0.5 * M_PI)
-        // snowflake.emissionRange = 0
-        // 子旋转角度范围
-        snowflake.spinRange = 0
-        // 粒子图片
-        snowflake.contents = UIImage.init(named: "star-full")?.cgImage
-        // 粒子颜色
-        snowflake.color = UIColor.init(colorLiteralRed: 1, green: 1, blue: 1, alpha: 0.5).cgColor
-        
-        snowflake.redRange = 1
-        snowflake.blueRange = 1
-        snowflake.greenRange = 1
-        
-        snowflake.redSpeed = -0.1
-        snowflake.blueSpeed = -0.2
-        snowflake.greenSpeed = -0.3
-        
-        snowflake.alphaSpeed = -0.1
-        snowflake.alphaRange = 2
-        
-        // 设置阴影
-        snowEmitter.shadowOpacity = 1.0
-        snowEmitter.shadowRadius  = 0.0
-        snowEmitter.shadowOffset  = CGSize.init(width: 0.0, height: 1.0)
-        snowEmitter.shadowColor   = UIColor.white.cgColor
-        
-        // 将粒子添加到发射器
-        snowEmitter.emitterCells = [snowflake]
-        self.view.layer.insertSublayer(snowEmitter, at: 0)
-    }
-    
- 
-    func starEffect() {
-        // 粒子发射器
-        let snowEmitter = CAEmitterLayer.init()
-        // 粒子发射的位置
-        snowEmitter.emitterPosition = CGPoint.init(x: self.view.bounds.size.width/2.0, y: self.view.bounds.size.height/2.0)
-        // 发射源大小
-        snowEmitter.emitterSize = CGSize.init(width: 0, height:0)
-        // 发射模式
-        snowEmitter.emitterMode = kCAEmitterLayerOutline
-        // 发射源的形状
-        snowEmitter.emitterShape = kCAEmitterLayerRectangle
-        
-        snowEmitter.renderMode = kCAEmitterLayerAdditive
-        
-        snowEmitter.seed = (arc4random()%100)+1
-        
-        
-//        CAEmitterCell* rocket  = [CAEmitterCell emitterCell];
-//        rocket.birthRate = 1.0; //是每秒某个点产生的effectCell数量
-//        rocket.emissionRange = 0.25 * M_PI; // 周围发射角度
-//        rocket.velocity = 400; // 速度
-//        rocket.velocityRange = 100; // 速度范围
-//        rocket.yAcceleration = 75; // 粒子y方向的加速度分量
-//        rocket.lifetime = 1.02;
-        
-        // 创建雪花粒子
-        let snowflake = CAEmitterCell.init()
-        // 粒子的名字
-        snowflake.name = "snow"
-        // 粒子参数的速度乘数因子 越大出现的越快
-        snowflake.birthRate = 6.0
-        // 存活时间
-        snowflake.lifetime = 0.6
-        snowflake.lifetimeRange = 0.1
-        // 粒子速度
-        snowflake.velocity = 170
-        // 粒子速度范围
-        snowflake.velocityRange = 5
-        
-        // 粒子的发射方向
-        snowflake.emissionRange = CGFloat(0.1 * M_PI)
-        // 发射角的维度方向 感觉没啥用
-        // snowflake.emissionLatitude = CGFloat(0.1 * M_PI)
-        // 发射角的纵向方向
-        snowflake.emissionLongitude = CGFloat(0.5 * M_PI)
-        
-        // 粒子y方向加速度分量
-        snowflake.yAcceleration = 2
-        
-        // 子旋转角度范围
-        snowflake.spinRange = 0
-        // 粒子图片
-        snowflake.contents = UIImage.init(named: "star-full")?.cgImage
-        // 粒子颜色
-        snowflake.color = UIColor.init(colorLiteralRed: 1, green: 1, blue: 1, alpha: 0.5).cgColor
-        
-        snowflake.redRange = 1
-        snowflake.blueRange = 1
-        snowflake.greenRange = 1
-        
-        snowflake.redSpeed = -0.1
-        snowflake.blueSpeed = -0.2
-        snowflake.greenSpeed = -0.3
-        
-        snowflake.alphaSpeed = -0.5
-        snowflake.alphaRange = 1
-        
-        // 设置阴影
-        snowEmitter.shadowOpacity = 1.0
-        snowEmitter.shadowRadius  = 0.0
-        snowEmitter.shadowOffset  = CGSize.init(width: 0.0, height: 1.0)
-        snowEmitter.shadowColor   = UIColor.white.cgColor
-        
-        // 将粒子添加到发射器
-        snowEmitter.emitterCells = [snowflake]
-        self.view.layer.insertSublayer(snowEmitter, at: 0)
-    }
-    
-
 }
 

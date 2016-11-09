@@ -17,18 +17,18 @@ class RedPacketBoxView: UIView {
     var name: String = ""
     var amount: CGFloat = 0
     var overMax: Bool = false
-    var queueNumber = 0
+    var index = 0
     
     // 动画完成闭包
     var completeClosure = { (index: Int) -> Void in
         
     }
     
-    convenience init(name: String, amount: CGFloat, pointY: CGFloat, number: Int, completeClosure: @escaping (Int) -> Void) {
+    convenience init(name: String, amount: CGFloat, pointY: CGFloat, index: Int, completeClosure: @escaping (Int) -> Void) {
         self.init(frame: CGRect.init(x: -230, y: pointY, width: 220, height: 58))
         self.name = name
         self.amount = amount
-        self.queueNumber = number
+        self.index = index
         self.completeClosure = completeClosure
         self.setupUI()
         self.appearAnimation()
@@ -215,7 +215,7 @@ class RedPacketBoxView: UIView {
         }) { (_) in
             
             // 动画完成闭包
-            self.completeClosure(self.queueNumber)
+            self.completeClosure(self.index)
         }
     }
 }
